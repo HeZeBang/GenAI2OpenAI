@@ -1,13 +1,15 @@
 from flask import Flask, request, jsonify, stream_with_context, Response
+from flask_cors import CORS
 import requests
 import json
 import uuid
 from datetime import datetime
 import re
 import argparse
-from icecream import ic 
+from icecream import ic
 
 app = Flask(__name__)
+CORS(app)
 
 # 解析命令行参数
 parser = argparse.ArgumentParser(description='GenAI Flask API Server')

@@ -1,52 +1,95 @@
-# GenAI 项目
+# GenAI2OpenAI
 
-## 项目简介
-
-GenAI 是一个基于 Flask 的聊天机器人接口服务，兼容 OpenAI 的聊天完成接口，利用上海科技大学的 GenAI API 进行智能对话。项目通过封装 GenAI API，支持流式响应和普通响应，从而方便客户端集成与调用。该项目适合开发具有中文支持及本地化需求的智能聊天机器人应用。
+OpenAI 兼容的代理服务，将上海科技大学 GenAI 平台的 API 转换为标准 OpenAI Chat Completion 接口，支持 tool calling。
 
 ## 安装与运行
 
 ### 环境要求
 
-- Python 3.11 及以上版本
-- 依赖包见 `pyproject.toml`，推荐使用uv管理环境。
+- Python 3.11+
+- 推荐使用 [uv](https://github.com/astral-sh/uv) 管理环境
 
 ### 启动服务
 
 ```bash
-uv run main.py --token <token> [--port 5000]
+uv run main.py --token <token> [--port 5000] [--api-key <key>] [--debug]
 ```
 
-<token>的获取方式见下文，端口默认5000。服务将在本地 `0.0.0.0:5000` 端口启动。
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--token` | GenAI 平台的访问令牌（必需） | — |
+| `--port` | 服务监听端口 | `5000` |
+| `--api-key` | 客户端认证密钥（也可通过 `API_KEY` 环境变量设置） | 无（不校验） |
+| `--debug` | 启用详细日志输出 | 关闭 |
 
-## 功能和用法
+## 功能
 
-- 兼容 OpenAI Chat Completion API 请求格式，支持 POST `/v1/chat/completions` 接口，实现智能聊天功能。
-- 支持流式（stream）及非流式响应，方便高效地获取 AI 回复。
-- 提供 `/v1/models` 接口列出可用模型，如 `gpt-3.5-turbo`、`gpt-4`、`deepseek-v3` 等。
-- 内置 `/health` 健康检查接口，用于服务状态监测。
+### OpenAI 兼容接口
 
-## Token获取
+- `POST /v1/chat/completions` — 聊天补全（流式/非流式）
+- `GET /v1/models` — 列出可用模型
+- `GET /health` — 健康检查
 
-1. 首先前往[GenAI对话平台](https://genai.shanghaitech.edu.cn/dialogue)
-2. 打开浏览器开发者工具，随便发送一条消息，捕获名为`chat`的请求
-3. 复制请求标头中的`x-access-token`字段，即为`<token>`
+### Tool Calling
 
-![图片说明](images/chrome.png)
+支持 OpenAI 格式的 tool calling，通过 prompt 注入实现，兼容不原生支持 function calling 的模型。
 
-## 开发与贡献指南
+```python
+from openai import OpenAI
 
-- 欢迎 fork 并提交 PR，改进功能或修复 bug。
-- 请遵守项目代码风格，代码中请添加必要注释。
-- 贡献代码时建议附带测试，确保功能完整性。
-- 遇到问题可通过 issue 反馈。
+client = OpenAI(
+    base_url="http://localhost:5000/v1",
+    api_key="your-api-key"  # 如果设置了 --api-key
+)
 
-## 联系方式与许可
+response = client.chat.completions.create(
+    model="GPT-4.1",
+    messages=[{"role": "user", "content": "北京今天天气怎么样？"}],
+    tools=[{
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "获取指定城市的天气信息",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string", "description": "城市名称"}
+                },
+                "required": ["city"]
+            }
+        }
+    }]
+)
+```
 
-- 联系邮箱：arnoliu@shanghaitech.edu.cn
-- 本项目采用 MIT 许可证，详见 LICENSE 文件。
+支持 `tool_choice` 参数：`"auto"`（默认）、`"required"`、指定函数名。
 
-## TODO
+### API Key 认证
 
-- 身份验证或者签名机制，避免滥用
+设置 `--api-key` 或环境变量 `API_KEY` 后，所有 `/v1/` 请求需要携带 `Authorization: Bearer <key>` 请求头。未设置时跳过认证（开发模式）。
 
+### 支持的模型
+
+| 模型 | 后端类型 |
+|------|----------|
+| `GPT-5` | Azure |
+| `GPT-4.1` | Azure |
+| `GPT-4.1-mini` | Azure |
+| `o4-mini` | Azure |
+| `o3` | Azure |
+| `deepseek-v3:671b` | Xinference |
+| `deepseek-r1:671b` | Xinference |
+| `qwen-instruct` | Xinference |
+| `qwen-think` | Xinference |
+
+## Token 获取
+
+1. 前往 [GenAI 对话平台](https://genai.shanghaitech.edu.cn/dialogue)
+2. 打开浏览器开发者工具，发送一条消息，捕获 `chat` 请求
+3. 复制请求头中的 `x-access-token` 字段
+
+![Token 获取示意](images/chrome.png)
+
+## 许可
+
+MIT License — 详见 LICENSE 文件。

@@ -249,20 +249,71 @@ def strip_think_blocks(content):
     return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
 
 
+def _parse_tool_call_body(raw):
+    """解析 <tool_call>...</tool_call> 内部的内容。
+
+    支持两种格式：
+    1. JSON: {"name": "func", "arguments": {...}}
+    2. XML:  <name>func</name><arguments>{"key": "val"}</arguments>
+       或    <name>func</name><arguments>\n{"key": "val"}\n</arguments>
+    返回 {"name": ..., "arguments": ...} 或 None。
+    """
+    raw = raw.strip()
+
+    # 尝试 JSON 格式
+    try:
+        call = json.loads(raw)
+        if "name" in call:
+            return call
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 尝试 XML 格式: <name>...</name> ... <arguments>...</arguments>
+    name_m = re.search(r'<name>\s*(.*?)\s*</name>', raw, re.DOTALL)
+    args_m = re.search(r'<arguments>\s*(.*?)\s*</arguments>', raw, re.DOTALL)
+    if name_m:
+        name = name_m.group(1).strip()
+        arguments = {}
+        if args_m:
+            args_str = args_m.group(1).strip()
+            try:
+                arguments = json.loads(args_str)
+            except (json.JSONDecodeError, ValueError):
+                # arguments 不是合法 JSON，当作字符串
+                arguments = {"raw": args_str}
+        return {"name": name, "arguments": arguments}
+
+    return None
+
+
 def extract_tool_calls(content):
     """从模型文本中提取 <tool_call>...</tool_call> 块，返回 (tool_calls, remaining_text)"""
     # 先剥离 <think> 块，避免误匹配
     cleaned = strip_think_blocks(content)
+
+    # 剥离包裹 <tool_call> 的 markdown 代码块（模型可能不听话）
+    # 匹配 ```xml、```json、``` 等包裹
+    cleaned = re.sub(
+        r'```(?:xml|json|plaintext|text)?\s*\n?\s*(<tool_call>.*?</tool_call>)\s*\n?\s*```',
+        r'\1',
+        cleaned,
+        flags=re.DOTALL
+    )
+
     pattern = r'<tool_call>\s*(.*?)\s*</tool_call>'
     matches = re.findall(pattern, cleaned, re.DOTALL)
 
     if not matches:
+        logger.debug("No <tool_call> tags found in content (%d chars): %s",
+                      len(content), content[:500])
         return None, content
 
+    logger.debug("Found %d <tool_call> match(es)", len(matches))
+
     tool_calls = []
-    for match in matches:
-        try:
-            call = json.loads(match)
+    for i, match in enumerate(matches):
+        call = _parse_tool_call_body(match)
+        if call:
             tool_calls.append({
                 "id": f"call_{uuid.uuid4().hex[:24]}",
                 "type": "function",
@@ -274,7 +325,8 @@ def extract_tool_calls(content):
                     )
                 }
             })
-        except (json.JSONDecodeError, KeyError):
+        else:
+            logger.warning("Failed to parse tool_call[%d] — raw: %s", i, match[:300])
             continue
 
     if not tool_calls:
@@ -301,17 +353,24 @@ def convert_messages_to_genai_format(messages):
     return chat_info
 
 def extract_content_from_genai(response_data):
-    """从GenAI API响应中提取内容"""
+    """从GenAI API响应中提取 (content, reasoning_content)。
+
+    GenAI 上游对 DeepSeek 模型的 chunk 格式：
+    - V3: {"content": "你好", "reasoning_content": null}
+    - R1 思考阶段: {"reasoning_content": "嗯...", "content": ""}
+    - R1 回复阶段: {"content": "你好", "reasoning_content": null}
+
+    返回 (content, reasoning_content) 元组，均可能为 None。
+    """
     try:
         if "choices" in response_data and len(response_data["choices"]) > 0:
             delta = response_data["choices"][0].get("delta", {})
-            if "reasoning_content" in delta:
-                return delta["reasoning_content"]
-            content = delta.get("content", "")
-            return content
+            content = delta.get("content") or None
+            reasoning = delta.get("reasoning_content") or None
+            return content, reasoning
     except (KeyError, IndexError, TypeError):
         pass
-    return None
+    return None, None
 
 def stream_genai_response(chat_info, messages, model, max_tokens):
     """流式调用GenAI API并转换为OpenAI格式"""
@@ -414,10 +473,16 @@ def stream_genai_response(chat_info, messages, model, max_tokens):
                             yield "data: [DONE]\n\n"
                             break
 
-                        content = extract_content_from_genai(genai_json)
+                        content, reasoning = extract_content_from_genai(genai_json)
 
-                        if content is not None:
-                            # 转换为OpenAI格式
+                        # 构建 delta：content 和 reasoning_content 分开传递
+                        delta = {}
+                        if content:
+                            delta["content"] = content
+                        if reasoning:
+                            delta["reasoning_content"] = reasoning
+
+                        if delta:
                             openai_response = {
                                 "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
                                 "object": "chat.completion.chunk",
@@ -426,7 +491,7 @@ def stream_genai_response(chat_info, messages, model, max_tokens):
                                 "choices": [
                                     {
                                         "index": 0,
-                                        "delta": {"content": content},
+                                        "delta": delta,
                                         "finish_reason": None
                                     }
                                 ]
@@ -489,24 +554,33 @@ def stream_genai_response_with_tools(chat_info, messages, model, max_tokens):
             except json.JSONDecodeError:
                 pass
 
+    logger.debug("Tool calling: collected %d chars of content", len(complete_content))
+    if complete_content:
+        logger.debug("Tool calling: content preview: %s", complete_content[:500])
+
     # 检测是否包含 tool_call
     tool_calls, remaining_text = extract_tool_calls(complete_content)
 
     if tool_calls:
-        # 如果有剩余文本，先发送文本 chunk
+        logger.debug("Tool calling: emitting %d tool_call chunk(s)", len(tool_calls))
+
+        # 第一个 chunk 必须携带 role: assistant（OpenAI 流式协议要求）
+        # 如果有剩余文本，放在 content 里；否则发一个空 role chunk
+        first_delta = {"role": "assistant"}
         if remaining_text:
-            text_chunk = {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"role": "assistant", "content": remaining_text},
-                    "finish_reason": None
-                }]
-            }
-            yield f"data: {json.dumps(text_chunk)}\n\n"
+            first_delta["content"] = remaining_text
+        role_chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": first_delta,
+                "finish_reason": None
+            }]
+        }
+        yield f"data: {json.dumps(role_chunk)}\n\n"
 
         # 发送 tool_calls chunk
         for i, tc in enumerate(tool_calls):
@@ -550,7 +624,6 @@ def stream_genai_response_with_tools(chat_info, messages, model, max_tokens):
 
     else:
         # 没有 tool_call，按正常文本流式发送
-        # 重新跑一次流式会浪费，所以直接把收集到的内容一次性发出
         if complete_content:
             text_chunk = {
                 "id": completion_id,

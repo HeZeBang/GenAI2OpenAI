@@ -462,6 +462,14 @@ def stream_genai_response(chat_info, messages, model, max_tokens):
                     if line_str:
                         genai_json = json.loads(line_str)
 
+                        # 检查上游是否返回业务级错误（HTTP 200 但 success=false）
+                        if isinstance(genai_json, dict) and genai_json.get("success") is False:
+                            err_msg = genai_json.get("message", "Unknown upstream error")
+                            err_code = genai_json.get("code", 500)
+                            logger.warning("GenAI business error (code=%s): %s", err_code, err_msg)
+                            yield make_error_chunk(f"Upstream error: {err_msg}", model)
+                            return
+
                         # 检查是否已经完成
                         if "choices" in genai_json and len(genai_json["choices"]) > 0:
                             choice = genai_json["choices"][0]

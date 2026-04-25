@@ -6,7 +6,6 @@ from datetime import datetime
 
 from flask import Blueprint, current_app, request, jsonify, stream_with_context, Response
 
-from config import TokenExpiredError
 from errors import openai_error
 from tools.prompts import inject_tool_prompt
 from tools.parsing import extract_tool_calls
@@ -128,13 +127,6 @@ def chat_completions():
             }
             return jsonify(response)
 
-    except TokenExpiredError as e:
-        return openai_error(
-            f"Upstream token expired: {e}",
-            error_type="authentication_error",
-            code="token_expired",
-            status=401,
-        )
     except Exception as e:
         logger.exception("[%s] Unhandled error", request_id)
         return openai_error(

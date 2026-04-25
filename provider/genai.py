@@ -34,8 +34,9 @@ def extract_content_from_genai(response_data):
 
 
 def stream_genai_response(chat_info, messages, model, max_tokens, config):
-    root_ai_type = model_registry.get_root_ai_type(model, config.token)
-    headers = build_genai_headers(config.token)
+    token = config.token_manager.get_token()
+    root_ai_type = model_registry.get_root_ai_type(model, token)
+    headers = build_genai_headers(token)
 
     genai_data = {
         "chatInfo": "",
@@ -68,6 +69,16 @@ def stream_genai_response(chat_info, messages, model, max_tokens, config):
         )
 
         logger.debug("GenAI Response Status: %d", response.status_code)
+
+        if response.status_code == 401:
+            new_token = config.token_manager.force_refresh()
+            if new_token:
+                logger.info("Token refreshed after 401, retrying request")
+                headers = build_genai_headers(new_token)
+                response = requests.post(
+                    GENAI_URL, headers=headers, json=genai_data,
+                    stream=True, timeout=60
+                )
 
         if response.status_code != 200:
             logger.warning("GenAI API error %d: %s", response.status_code, response.text[:500])

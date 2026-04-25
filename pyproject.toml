@@ -7,5 +7,6 @@ requires-python = ">=3.11"
 dependencies = [
     "flask>=3.1.2",
     "flask-cors>=4.0.0",
+    "pycryptodome>=3.20.0",
     "requests>=2.32.5",
 ]

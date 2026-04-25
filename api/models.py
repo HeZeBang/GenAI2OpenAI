@@ -1,7 +1,6 @@
 from flask import Blueprint, jsonify, g
 
-from config import model_registry, TokenExpiredError
-from errors import openai_error
+from config import model_registry
 
 models_bp = Blueprint('models', __name__)
 
@@ -9,15 +8,7 @@ models_bp = Blueprint('models', __name__)
 @models_bp.route('/v1/models', methods=['GET'])
 def list_models():
     token = g.get("token", "")
-    try:
-        models_map = model_registry.get_models(token)
-    except TokenExpiredError as e:
-        return openai_error(
-            f"Upstream token expired: {e}",
-            error_type="authentication_error",
-            code="token_expired",
-            status=401,
-        )
+    models_map = model_registry.get_models(token)
 
     models = []
     for model_id, info in models_map.items():

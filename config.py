@@ -4,16 +4,15 @@ from dataclasses import dataclass, field
 
 import requests
 
+from auth.cas_login import LoginError
+from auth.token_manager import TokenExpiredError, TokenManager
+
 logger = logging.getLogger(__name__)
-
-
-class TokenExpiredError(Exception):
-    pass
 
 
 @dataclass
 class Config:
-    token: str
+    token_manager: TokenManager
     port: int
     api_key: str | None
     debug: bool

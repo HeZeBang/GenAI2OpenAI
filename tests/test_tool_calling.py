@@ -393,11 +393,7 @@ def test_tag_prefix_detection():
     """测试 7: _tag_prefix_len 单元测试（离线，不需要服务器）"""
     print_separator("Test 7: Tag Prefix Detection (Unit Test)")
 
-    # 导入被测函数
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("main", "main.py")
-    # 跳过 argparse 的导入问题，直接测试函数逻辑
-    # 内联实现同样的函数
+    # 可从 tools.parsing 导入，此处内联以便独立运行
     def _tag_prefix_len(text, tag):
         max_len = min(len(tag) - 1, len(text))
         for length in range(max_len, 0, -1):

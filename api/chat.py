@@ -13,6 +13,9 @@ from provider.genai import (
     convert_messages_to_genai_format,
     stream_genai_response,
     stream_genai_response_with_tools,
+    complete_usage,
+    estimate_messages_token_count,
+    estimate_token_count,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,6 +28,11 @@ def chat_completions():
     config = current_app.config["APP_CONFIG"]
     request_id = f"req_{uuid.uuid4().hex[:16]}"
     start_time = time.monotonic()
+    defer_completion_log = False
+
+    def log_completion():
+        elapsed = time.monotonic() - start_time
+        logger.info("[%s] completed in %.2fs", request_id, elapsed)
 
     try:
         req_data = request.get_json()
@@ -61,8 +69,15 @@ def chat_completions():
                 gen = stream_genai_response(
                     chat_info, messages, model, max_tokens, config
                 )
+            def logged_stream():
+                try:
+                    yield from gen
+                finally:
+                    log_completion()
+
+            defer_completion_log = True
             return Response(
-                stream_with_context(gen),
+                stream_with_context(logged_stream()),
                 mimetype='text/event-stream',
                 headers={
                     'Cache-Control': 'no-cache',
@@ -73,6 +88,8 @@ def chat_completions():
 
         else:
             complete_content = ""
+            reasoning_content = ""
+            response_usage = None
             for line in stream_genai_response(chat_info, messages, model, max_tokens, config):
                 if line.startswith('data: '):
                     data_str = line[6:].strip()
@@ -80,11 +97,16 @@ def chat_completions():
                         continue
                     try:
                         data = json.loads(data_str)
+                        if isinstance(data.get('usage'), dict):
+                            response_usage = data['usage']
                         if 'choices' in data and data['choices']:
                             delta = data['choices'][0].get('delta', {})
                             content = delta.get('content', '')
                             if content:
                                 complete_content += content
+                            reasoning = delta.get('reasoning_content', '')
+                            if reasoning:
+                                reasoning_content += reasoning
                     except json.JSONDecodeError:
                         pass
 
@@ -109,6 +131,13 @@ def chat_completions():
                 }
                 finish_reason = "stop"
 
+            usage = complete_usage(
+                response_usage,
+                prompt_tokens=estimate_messages_token_count(messages),
+                completion_tokens=estimate_token_count(complete_content),
+                reasoning_tokens=estimate_token_count(reasoning_content) or None,
+            )
+
             response = {
                 "id": completion_id,
                 "object": "chat.completion",
@@ -119,11 +148,7 @@ def chat_completions():
                     "message": message_obj,
                     "finish_reason": finish_reason
                 }],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": len(complete_content),
-                    "total_tokens": len(complete_content)
-                }
+                "usage": usage
             }
             return jsonify(response)
 
@@ -136,5 +161,5 @@ def chat_completions():
             status=500
         )
     finally:
-        elapsed = time.monotonic() - start_time
-        logger.info("[%s] completed in %.2fs", request_id, elapsed)
+        if not defer_completion_log:
+            log_completion()

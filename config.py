@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -9,6 +10,28 @@ from auth.token_manager import TokenExpiredError, TokenManager
 
 logger = logging.getLogger(__name__)
 
+
+def _read_positive_float_env(name: str, default: float) -> float:
+    raw_value = os.environ.get(name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+
+    try:
+        value = float(raw_value)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using %.1fs", name, raw_value, default)
+        return default
+
+    if value <= 0:
+        logger.warning("Invalid %s=%r; using %.1fs", name, raw_value, default)
+        return default
+
+    return value
+
+
+GENAI_CONNECT_TIMEOUT = _read_positive_float_env("GENAI_CONNECT_TIMEOUT", 10.0)
+GENAI_READ_TIMEOUT = _read_positive_float_env("GENAI_READ_TIMEOUT", 300.0)
+GENAI_REQUEST_TIMEOUT = (GENAI_CONNECT_TIMEOUT, GENAI_READ_TIMEOUT)
 
 @dataclass
 class Config:

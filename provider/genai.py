@@ -5,7 +5,13 @@ from datetime import datetime
 
 import requests
 
-from config import GENAI_URL, build_genai_headers, model_registry
+from config import (
+    GENAI_READ_TIMEOUT,
+    GENAI_REQUEST_TIMEOUT,
+    GENAI_URL,
+    build_genai_headers,
+    model_registry,
+)
 from errors import make_error_chunk
 from tools.parsing import extract_tool_calls, _tag_prefix_len
 
@@ -65,7 +71,7 @@ def stream_genai_response(chat_info, messages, model, max_tokens, config):
             headers=headers,
             json=genai_data,
             stream=True,
-            timeout=60
+            timeout=GENAI_REQUEST_TIMEOUT
         )
 
         logger.debug("GenAI Response Status: %d", response.status_code)
@@ -77,7 +83,7 @@ def stream_genai_response(chat_info, messages, model, max_tokens, config):
                 headers = build_genai_headers(new_token)
                 response = requests.post(
                     GENAI_URL, headers=headers, json=genai_data,
-                    stream=True, timeout=60
+                    stream=True, timeout=GENAI_REQUEST_TIMEOUT
                 )
 
         if response.status_code != 200:
@@ -179,6 +185,19 @@ def stream_genai_response(chat_info, messages, model, max_tokens, config):
         yield f"data: {json.dumps(final_response)}\n\n"
         yield "data: [DONE]\n\n"
 
+    except requests.exceptions.ReadTimeout:
+        logger.warning("GenAI stream read timeout after %.1fs", GENAI_READ_TIMEOUT)
+        yield make_error_chunk(
+            f"Upstream GenAI read timed out after {GENAI_READ_TIMEOUT:g}s. "
+            "The request may be too large or the upstream model may be busy.",
+            model,
+        )
+    except requests.exceptions.ConnectTimeout:
+        logger.warning("GenAI stream connect timeout")
+        yield make_error_chunk("Upstream GenAI connection timed out", model)
+    except requests.exceptions.RequestException as e:
+        logger.exception("GenAI stream request failed")
+        yield make_error_chunk(f"Upstream GenAI request failed: {e}", model)
     except Exception as e:
         logger.exception("Error in stream_genai_response")
         yield make_error_chunk(str(e), model)

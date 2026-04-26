@@ -150,6 +150,21 @@ response = client.chat.completions.create(
 
 设置 `--api-key` 或环境变量 `API_KEY` 后，所有 `/v1/` 请求需要携带 `Authorization: Bearer <key>` 请求头。未设置时跳过认证（开发模式）。
 
+## 上游超时配置
+
+长上下文或上游模型排队时，GenAI 首个流式响应可能超过默认等待时间。可以通过环境变量调整代理访问上游的超时：
+
+| 环境变量 | 说明 | 默认值 |
+|----------|------|--------|
+| `GENAI_CONNECT_TIMEOUT` | 连接 GenAI 上游的超时时间（秒） | `10` |
+| `GENAI_READ_TIMEOUT` | 等待 GenAI 上游响应/流式分片的读超时时间（秒） | `300` |
+
+示例：
+
+```bash
+GENAI_READ_TIMEOUT=600 uv run main.py --token "2024000001@mypassword"
+```
+
 ## 项目结构
 
 ```

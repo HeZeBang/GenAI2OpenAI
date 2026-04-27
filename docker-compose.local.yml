@@ -1,0 +1,10 @@
+services:
+  genai2openai:
+    build: .
+    image: genai2openai:latest
+    ports:
+      - "${PORT:-5000}:5000"
+    environment:
+      - API_KEY=${API_KEY:-}
+    command: ["--token", "${TOKEN}", "--port", "5000"]
+    restart: unless-stopped

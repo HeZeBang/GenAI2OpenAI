@@ -1,0 +1,13 @@
+.venv
+__pycache__
+*.pyc
+.git
+.github
+images
+*.md
+LICENSE
+.env
+.envrc
+.ruff_cache
+.mypy_cache
+.pytest_cache

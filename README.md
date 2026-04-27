@@ -150,6 +150,51 @@ response = client.chat.completions.create(
 
 设置 `--api-key` 或环境变量 `API_KEY` 后，所有 `/v1/` 请求需要携带 `Authorization: Bearer <key>` 请求头。未设置时跳过认证（开发模式）。
 
+## Docker 部署
+
+### 使用 Docker Compose（推荐）
+
+```bash
+# 使用学号密码
+TOKEN="2024000001@mypassword" docker compose up -d
+
+# 使用 JWT
+TOKEN="eyJ..." docker compose up -d
+
+# 自定义端口和 API Key
+TOKEN="2024000001@mypassword" API_KEY="my-secret" PORT=8080 docker compose up -d
+```
+
+### 使用 Docker
+
+```bash
+# 构建镜像
+docker build -t genai2openai .
+
+# 运行容器
+docker run -d -p 5000:5000 genai2openai --token "2024000001@mypassword"
+
+# 带 API Key
+docker run -d -p 5000:5000 -e API_KEY="my-secret" genai2openai --token "2024000001@mypassword"
+```
+
+### 使用预构建镜像
+
+每次推送到 `main` 分支或创建版本标签时，GitHub Actions 会自动构建并推送镜像到 GitHub Container Registry：
+
+```bash
+docker pull ghcr.io/hebezang/genai2openai:main
+docker run -d -p 5000:5000 ghcr.io/hebezang/genai2openai:main --token "2024000001@mypassword"
+```
+
+### 环境变量说明
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `TOKEN` | JWT 令牌或 `学号@密码`（docker-compose 必需） | — |
+| `API_KEY` | 客户端认证密钥 | 无（不校验） |
+| `PORT` | 宿主机映射端口（仅 docker-compose） | `5000` |
+
 ## 项目结构
 
 ```

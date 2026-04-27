@@ -145,8 +145,8 @@ wheels = [
 ]
 
 [[package]]
-name = "genai"
-version = "0.1.0"
+name = "genai2openai"
+version = "2.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "flask" },

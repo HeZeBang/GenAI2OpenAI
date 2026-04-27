@@ -10,11 +10,33 @@ def strip_think_blocks(content):
     return re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
 
 
+def _fix_invalid_json_escapes(s):
+    r"""Fix invalid JSON escape sequences produced by some models.
+
+    JSON only allows \", \\, \/, \b, \f, \n, \r, \t and \uXXXX.
+    Models sometimes emit raw backslashes before other characters
+    (e.g. regex patterns like ``\{``).  Double-escape any invalid
+    ``\X`` so ``json.loads`` can succeed.
+    """
+    return re.sub(
+        r'\\(?!["\\/bfnrtu])',
+        r'\\\\',
+        s,
+    )
+
+
 def _parse_tool_call_body(raw):
     raw = raw.strip()
 
     try:
         call = json.loads(raw)
+        if "name" in call:
+            return call
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    try:
+        call = json.loads(_fix_invalid_json_escapes(raw))
         if "name" in call:
             return call
     except (json.JSONDecodeError, ValueError):
